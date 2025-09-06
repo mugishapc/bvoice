@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}BI VOICE - Burundian Chatting App{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="app-logo">
+            <h1>BI VOICE</h1>
+            <p>Burundian Chatting App</p>
+        </div>
+        
+        <div class="auth-buttons">
+            <a href="{{ url_for('login') }}" class="btn btn-primary">Login</a>
+            <a href="{{ url_for('register') }}" class="btn btn-secondary">Register</a>
+        </div>
+        
+        <div class="app-features">
+            <h3>Features:</h3>
+            <ul>
+                <li>Real-time messaging</li>
+                <li>Group chats</li>
+                <li>text chat</li>
+                <li>video chat</li>
+                <li>Voice chat</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

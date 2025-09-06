@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block title %}BI VOICE - Chats{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <div class="user-info">
+                <img src="{{ url_for('static', filename='uploads/' + current_user.profile_picture) }}" 
+                     alt="Profile" class="profile-pic">
+                <span>{{ current_user.username }}</span>
+            </div>
+            <div class="sidebar-actions">
+                <button id="new-chat-btn" title="New Chat">+</button>
+                <a href="{{ url_for('profile') }}" title="Profile">
+                    <img src="{{ url_for('static', filename='icons/profile-icon.png') }}" alt="Profile">
+                </a>
+                <a href="{{ url_for('logout') }}" title="Logout">
+                    <img src="{{ url_for('static', filename='icons/logout-icon.png') }}" alt="Logout">
+                </a>
+            </div>
+        </div>
+        
+        <div class="search-container">
+            <input type="text" placeholder="Search or start new chat" id="search-input">
+        </div>
+        
+        <div class="chats-list">
+            <!-- Contacts/Users list -->
+            <div class="list-section">
+                <h3>Contacts</h3>
+                <div class="contacts-list">
+                    {% for user in users %}
+                    <div class="chat-item" data-id="{{ user.id }}" data-type="user">
+                        <img src="{{ url_for('static', filename='uploads/' + user.profile_picture) }}" 
+                             alt="{{ user.username }}" class="profile-pic">
+                        <div class="chat-info">
+                            <div class="chat-name">{{ user.username }}</div>
+                            <div class="chat-last-message">Click to start chatting</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <!-- Groups list -->
+            <div class="list-section">
+                <h3>Groups</h3>
+                <div class="groups-list">
+                    {% for group in groups %}
+                    <div class="chat-item" data-id="{{ group.id }}" data-type="group">
+                        <img src="{{ url_for('static', filename='uploads/' + group.profile_picture) }}" 
+                             alt="{{ group.name }}" class="profile-pic">
+                        <div class="chat-info">
+                            <div class="chat-name">{{ group.name }}</div>
+                            <div class="chat-last-message">{{ group.description }}</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <a href="{{ url_for('create_group') }}" class="create-group-btn">Create New Group</a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Chat area -->
+    <div class="chat-area">
+        <div class="chat-placeholder">
+            <div class="placeholder-content">
+                <img src="{{ url_for('static', filename='icons/chat-icon.png') }}" alt="Chat">
+                <h2>BI VOICE</h2>
+                <p>Select a chat or start a new conversation</p>
+            </div>
+        </div>
+        
+        <div class="active-chat" style="display: none;">
+            <div class="chat-header">
+                <div class="chat-partner-info">
+                    <img id="chat-partner-pic" src="" alt="Profile" class="profile-pic">
+                    <div>
+                        <div id="chat-partner-name"></div>
+                        <div id="chat-partner-status"></div>
+                    </div>
+                </div>
+                <div class="chat-actions">
+                    <button id="voice-call-btn" title="Voice Call">
+                        <img src="{{ url_for('static', filename='icons/call-icon.png') }}" alt="Call">
+                    </button>
+                    <button id="video-call-btn" title="Video Call">
+                        <img src="{{ url_for('static', filename='icons/video-icon.png') }}" alt="Video">
+                    </button>
+                    <button id="menu-btn" title="Menu">
+                        <img src="{{ url_for('static', filename='icons/menu-icon.png') }}" alt="Menu">
+                    </button>
+                </div>
+            </div>
+            
+            <div class="messages-container" id="messages-container">
+                <!-- Messages will be loaded here -->
+            </div>
+            
+            <div class="message-input-container">
+                <div class="input-actions">
+                    <button id="emoji-btn" title="Emoji">
+                        <img src="{{ url_for('static', filename='icons/emoji-icon.png') }}" alt="Emoji">
+                    </button>
+                    <button id="attach-btn" title="Attach File">
+                        <img src="{{ url_for('static', filename='icons/attach-icon.png') }}" alt="Attach">
+                        <input type="file" id="file-input" style="display: none;" multiple>
+                    </button>
+                    <button id="voice-message-btn" title="Voice Message">
+                        <img src="{{ url_for('static', filename='icons/mic-icon.png') }}" alt="Mic">
+                    </button>
+                </div>
+                
+                <div class="message-input-wrapper">
+                    <input type="text" id="message-input" placeholder="Type a message">
+                </div>
+                
+                <button id="send-btn" title="Send">
+                    <img src="{{ url_for('static', filename='icons/send-icon.png') }}" alt="Send">
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Voice message recorder -->
+<div class="voice-recorder" id="voice-recorder" style="display: none;">
+    <div class="recorder-content">
+        <div class="recording-indicator">
+            <div class="pulse"></div>
+            <span>Recording...</span>
+        </div>
+        <button id="stop-recording-btn">Stop</button>
+    </div>
+</div>
+
+<!-- Add this to your chat.html file -->
+<div class="video-call-container" id="video-call-container">
+    <div class="video-call-header">
+        <div class="call-partner-info">
+            <span id="call-partner-name">Calling...</span>
+        </div>
+        <button id="minimize-call-btn">−</button>
+    </div>
+    
+    <div class="video-call-content">
+        <video id="remote-video" class="remote-video" autoplay playsinline></video>
+        <video id="local-video" class="local-video" autoplay playsinline muted></video>
+        
+        <div class="video-call-controls">
+            <button class="call-control-btn call-mute" id="mute-audio-btn" title="Mute">
+                <i>🎤</i>
+            </button>
+            <button class="call-control-btn call-end" id="end-call-btn" title="End Call">
+                <i>📞</i>
+            </button>
+            <button class="call-control-btn call-video" id="mute-video-btn" title="Video Off">
+                <i>📹</i>
+            </button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
