@@ -1,8 +1,3 @@
+venv/
 *.pyc
 __pycache__/
-instance/
-venv/
-.env
-*.sqlite3
-uploads/
-*.log
