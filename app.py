@@ -1,4 +1,5 @@
 import os
+import gc
 from flask import Flask, render_template, url_for, flash, redirect, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_login import LoginManager, login_user, current_user, logout_user, login_required
@@ -20,7 +21,7 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField, BooleanField, TextAreaField, FileField
 from wtforms.validators import DataRequired, Length, Email, EqualTo, ValidationError
 from models import User, Message
-import os
+import os, psutil
 from forms import UpdateGroupForm
 
 # Create Flask app first
@@ -35,10 +36,19 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Initialize extensions
- # Initialize db ith app
 db.init_app(app)
 bcrypt = Bcrypt(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Initialize SocketIO with threading for free tier compatibility
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins="*",
+    ping_timeout=30,  # Reduced from 60
+    ping_interval=15,  # Reduced from 25
+    async_mode='threading',
+    logger=False,  # Reduce logging overhead
+    engineio_logger=False  # Reduce logging overhead
+)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 login_manager.login_message_category = 'info'
@@ -56,6 +66,19 @@ VAPID_CLAIMS = {
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
+
+# Add memory optimization
+@app.after_request
+def after_request(response):
+    # Force garbage collection after each request to free memory
+    gc.collect()
+    return response
+
+
+
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    db.session.remove()
 
 
 # Routes
@@ -101,7 +124,6 @@ def login():
             flash('Login unsuccessful. Please check email and password', 'danger')
     
     return render_template('auth.html', title='Login', form=form, form_type='login')
-
 
 @app.route('/logout')
 def logout():
@@ -183,7 +205,6 @@ def profile():
 
     return render_template('profile.html', form=form)
 
-
 from forms import GroupForm
 
 @app.route('/create_group', methods=['GET', 'POST'])
@@ -203,9 +224,6 @@ def create_group():
         return redirect(url_for('chats'))
     
     return render_template('create_group.html', form=form)
-
-
-
 
 @app.route('/messages/<int:user_id>')
 @login_required
@@ -678,9 +696,22 @@ def update_group(group_id):
 
     return render_template('update_group.html', form=form, group=group)
 
+# Health check endpoint for monitoring
+@app.route('/health')
+def health():
+    import psutil
+    import os
+    process = psutil.Process(os.getpid())
+    return jsonify({
+        'status': 'healthy',
+        'memory_mb': process.memory_info().rss / 1024 / 1024,
+        'cpu_percent': process.cpu_percent()
+    })
+
 # Create database tables
 with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
+    # For local development
     socketio.run(app, debug=True)
