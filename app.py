@@ -20,8 +20,8 @@ from pywebpush import webpush, WebPushException
 
 # --- Flask App ---
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'replace_with_secure_secret!'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'replace_with_secure_secret!')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = os.path.join('static', 'uploads')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
@@ -96,7 +96,7 @@ class Group(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True)
-    profile_picture = db.Column(db.String(20), nullable=True, default='group-default.jpg')  # Add this line
+    profile_picture = db.Column(db.String(20), nullable=True, default='group-default.jpg')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     
@@ -161,7 +161,7 @@ class UpdateGroupForm(FlaskForm):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id))
+    return User.query.get(int(user_id))
 
 # --- Memory Management ---
 @app.after_request
@@ -185,9 +185,15 @@ def register():
     if current_user.is_authenticated:
         return redirect(url_for('chats'))
     
-    form = RegistrationForm()  # Create form instance
+    form = RegistrationForm()
     
     if form.validate_on_submit():
+        # Check if user already exists
+        existing_user = User.query.filter((User.email == form.email.data) | (User.username == form.username.data)).first()
+        if existing_user:
+            flash('Email or username already exists', 'danger')
+            return render_template('auth.html', title='Register', form=form, form_type='register')
+        
         # Form validation passed, process the data
         hashed_password = bcrypt.generate_password_hash(form.password.data).decode('utf-8')
         user = User(username=form.username.data, email=form.email.data, password=hashed_password)
@@ -252,10 +258,13 @@ def send_push_notification(user, title, body, url=None):
         return True
     except WebPushException as e:
         print("Web push failed:", e)
-        if e.response.status_code == 410:
+        if e.response and e.response.status_code == 410:
             # Subscription is no longer valid, remove it
             user.push_subscription = None
             db.session.commit()
+        return False
+    except Exception as e:
+        print("Web push error:", e)
         return False
 
 @app.route('/chats')
@@ -272,7 +281,7 @@ def chats():
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
-    form = UpdateAccountForm(obj=current_user)  # pre-fill form with current user data
+    form = UpdateAccountForm(obj=current_user)
 
     if form.validate_on_submit():
         # Check if username changed and is unique
@@ -342,6 +351,11 @@ def get_messages(user_id):
 @app.route('/group_messages/<int:group_id>')
 @login_required
 def get_group_messages(group_id):
+    # Check if user is a member of the group
+    membership = GroupMember.query.filter_by(group_id=group_id, user_id=current_user.id).first()
+    if not membership:
+        return jsonify({'error': 'Access denied'}), 403
+        
     messages = Message.query.filter_by(group_id=group_id).order_by(Message.timestamp.asc()).all()
     
     return jsonify([{
@@ -401,70 +415,75 @@ def handle_disconnect():
 # Combined send_message handler
 @socketio.on('send_message')
 def handle_send_message(data):
-    content = data['content']
-    receiver_id = data.get('receiver_id')
-    group_id = data.get('group_id')
-    message_type = data.get('message_type', 'text')
-    file_path = data.get('file_path')
-    reply_to_id = data.get('reply_to_id')
-    
-    message = Message(
-        content=content,
-        sender_id=current_user.id,
-        receiver_id=receiver_id,
-        group_id=group_id,
-        message_type=message_type,
-        file_path=file_path,
-        reply_to_id=reply_to_id
-    )
-    
-    db.session.add(message)
-    db.session.commit()
-    
-    # After saving the message, send notification to receiver for direct messages
-    if not group_id and receiver_id:  # Only for direct messages
-        receiver = User.query.get(receiver_id)
-        if receiver and receiver.push_subscription:
-            send_push_notification(
-                receiver,
-                f"New message from {current_user.username}",
-                content[:100] + ('...' if len(content) > 100 else ''),
-                url_for('chats', _external=True)
-            )
-    
-    # Prepare response data
-    response = {
-        'id': message.id,
-        'content': message.content,
-        'timestamp': message.timestamp.isoformat(),
-        'sender_id': message.sender_id,
-        'receiver_id': message.receiver_id,
-        'group_id': message.group_id,
-        'is_read': message.is_read,
-        'message_type': message.message_type,
-        'file_path': message.file_path,
-        'sender_name': current_user.username,
-        'reply_to_id': message.reply_to_id
-    }
-    
-    # If replying to a message, include replied message info
-    if message.reply_to_id:
-        replied_msg = Message.query.get(message.reply_to_id)
-        if replied_msg:
-            response['reply_to'] = {
-                'id': replied_msg.id,
-                'content': replied_msg.content[:50] + ('...' if len(replied_msg.content) > 50 else ''),
-                'sender_name': replied_msg.sender.username
-            }
-    
-    if group_id:
-        # Send to all group members
-        emit('receive_message', response, room=str(group_id))
-    else:
-        # Send to receiver
-        emit('receive_message', response, room=str(receiver_id))
-        # Also send to sender for UI update
-        emit('receive_message', response, room=str(current_user.id))
+    try:
+        content = data['content']
+        receiver_id = data.get('receiver_id')
+        group_id = data.get('group_id')
+        message_type = data.get('message_type', 'text')
+        file_path = data.get('file_path')
+        reply_to_id = data.get('reply_to_id')
+        
+        message = Message(
+            content=content,
+            sender_id=current_user.id,
+            receiver_id=receiver_id,
+            group_id=group_id,
+            message_type=message_type,
+            file_path=file_path,
+            reply_to_id=reply_to_id
+        )
+        
+        db.session.add(message)
+        db.session.commit()
+        
+        # After saving the message, send notification to receiver for direct messages
+        if not group_id and receiver_id:  # Only for direct messages
+            receiver = User.query.get(receiver_id)
+            if receiver and receiver.push_subscription:
+                send_push_notification(
+                    receiver,
+                    f"New message from {current_user.username}",
+                    content[:100] + ('...' if len(content) > 100 else ''),
+                    url_for('chats', _external=True)
+                )
+        
+        # Prepare response data
+        response = {
+            'id': message.id,
+            'content': message.content,
+            'timestamp': message.timestamp.isoformat(),
+            'sender_id': message.sender_id,
+            'receiver_id': message.receiver_id,
+            'group_id': message.group_id,
+            'is_read': message.is_read,
+            'message_type': message.message_type,
+            'file_path': message.file_path,
+            'sender_name': current_user.username,
+            'reply_to_id': message.reply_to_id
+        }
+        
+        # If replying to a message, include replied message info
+        if message.reply_to_id:
+            replied_msg = Message.query.get(message.reply_to_id)
+            if replied_msg:
+                response['reply_to'] = {
+                    'id': replied_msg.id,
+                    'content': replied_msg.content[:50] + ('...' if len(replied_msg.content) > 50 else ''),
+                    'sender_name': replied_msg.sender.username
+                }
+        
+        if group_id:
+            # Send to all group members
+            emit('receive_message', response, room=str(group_id))
+        else:
+            # Send to receiver
+            emit('receive_message', response, room=str(receiver_id))
+            # Also send to sender for UI update
+            emit('receive_message', response, room=str(current_user.id))
+            
+    except Exception as e:
+        print(f"Error in handle_send_message: {e}")
+        emit('error', {'message': 'Failed to send message'})
 
 @socketio.on('join_group')
 def handle_join_group(data):
@@ -787,7 +806,7 @@ def update_group(group_id):
     return render_template('update_group.html', form=form, group=group)
 
 
-# Add this with your other routes (around line 650-660 area)
+# Add this with your other routes
 @app.route('/icon-<size>.png')
 def serve_icon(size):
     """Serve PWA icons"""
@@ -813,4 +832,4 @@ with app.app_context():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, debug=False, host="0.0.0.0", port=port)
+    socketio.run(app, debug=True, host="0.0.0.0", port=port)

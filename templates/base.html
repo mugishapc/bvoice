@@ -10,7 +10,7 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='icons/favicon.png') }}">
 
     <!-- PWA Manifest -->
-    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <link rel="manifest" href="{{ url_for('manifest') }}">
     <meta name="theme-color" content="#128C7E">
 
     <!-- iOS Support -->
@@ -42,7 +42,8 @@
     <!-- Global variables passed from Flask -->
     <script id="user-data" type="application/json">
         {
-            "current_user_id": {% if current_user.is_authenticated %}{{ current_user.id }}{% else %}null{% endif %}
+            "current_user_id": {% if current_user.is_authenticated %}{{ current_user.id }}{% else %}null{% endif %},
+            "current_user_name": "{% if current_user.is_authenticated %}{{ current_user.username }}{% else %}null{% endif %}"
         }
     </script>
     
