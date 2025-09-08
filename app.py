@@ -1,63 +1,46 @@
-# THIS MUST BE THE VERY FIRST THING IN YOUR FILE
+# Eventlet patch must be first
 import eventlet
 eventlet.monkey_patch()
 
-# Now import other modules
-import os
-import gc
+import os, gc, json
+from datetime import datetime
 from flask import Flask, render_template, url_for, flash, redirect, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_login import LoginManager, login_user, current_user, logout_user, login_required
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
-from datetime import datetime
-import json
-from pywebpush import webpush, WebPushException
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.backends import default_backend
-import base64
 from PIL import Image
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField, BooleanField, TextAreaField, FileField
-from wtforms.validators import DataRequired, Length, Email, EqualTo, ValidationError
+from wtforms.validators import DataRequired, Length, Email, EqualTo
 import psutil
+from pywebpush import webpush, WebPushException
 
-# Create Flask app first
+# --- Flask App ---
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'd29c234ca310aa6990092d4b6cd4c4854585c51e1f73bf4de510adca03f5bc4e'  # Change this in production!
+app.config['SECRET_KEY'] = 'replace_with_secure_secret!'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = os.path.join('static', 'uploads')
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-# Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Initialize extensions
-db = SQLAlchemy()
+# --- Extensions ---
+db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 login_manager.login_message_category = 'info'
 
-# Initialize SocketIO
-socketio = SocketIO(app, 
-                   async_mode='eventlet',
-                   cors_allowed_origins="*",
-                   ping_timeout=60,
-                   ping_interval=25,
-                   logger=True,
-                   engineio_logger=True)
+socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*", ping_timeout=60, ping_interval=25)
 
-# VAPID keys (replace with your own keys)
+# --- VAPID Keys ---
 VAPID_PRIVATE_KEY = "RMjjSP6S-RN6U49FPbbDGWZ_dpxI5hlwZlKQHThgBxc"
 VAPID_PUBLIC_KEY  = "ivyTN3460JvPh_DZvkiNpYr2i5M4E7FZBCI_i7TWLBkZ9NkqGoN1qWlEr-54rGDOJTNrPGO_hWVjvTR_iVF9mQ"
-VAPID_CLAIMS = {
-    "sub": "mailto:mpc0679@gmail.com"  # replace with your email
-}
-
+VAPID_CLAIMS = {"sub": "mailto:mpc0679@gmail.com"}
 # Define models here to avoid circular imports
 class User(db.Model):
     __tablename__ = 'user'
@@ -112,6 +95,7 @@ class Group(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True)
+    profile_picture = db.Column(db.String(20), nullable=True, default='group-default.jpg')  # Add this line
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     
@@ -119,7 +103,6 @@ class Group(db.Model):
     members = db.relationship('GroupMember', back_populates='group')
     messages = db.relationship('Message', backref='group', lazy=True)
     creator = db.relationship('User', backref='created_groups')
-
 class GroupMember(db.Model):
     __tablename__ = 'group_member'
     id = db.Column(db.Integer, primary_key=True)
@@ -181,10 +164,9 @@ db.init_app(app)
 def load_user(user_id):
     return db.session.get(User, int(user_id))
 
-# Add memory optimization
+# --- Memory Management ---
 @app.after_request
 def after_request(response):
-    # Force garbage collection after each request to free memory
     gc.collect()
     return response
 
@@ -831,5 +813,5 @@ with app.app_context():
     db.create_all()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # use Render's port or default 5000
+    port = int(os.environ.get("PORT", 5000))
     socketio.run(app, debug=False, host="0.0.0.0", port=port)
