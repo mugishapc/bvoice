@@ -41,6 +41,7 @@ socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*", ping_t
 VAPID_PRIVATE_KEY = "RMjjSP6S-RN6U49FPbbDGWZ_dpxI5hlwZlKQHThgBxc"
 VAPID_PUBLIC_KEY  = "ivyTN3460JvPh_DZvkiNpYr2i5M4E7FZBCI_i7TWLBkZ9NkqGoN1qWlEr-54rGDOJTNrPGO_hWVjvTR_iVF9mQ"
 VAPID_CLAIMS = {"sub": "mailto:mpc0679@gmail.com"}
+
 # Define models here to avoid circular imports
 class User(db.Model):
     __tablename__ = 'user'
@@ -103,6 +104,7 @@ class Group(db.Model):
     members = db.relationship('GroupMember', back_populates='group')
     messages = db.relationship('Message', backref='group', lazy=True)
     creator = db.relationship('User', backref='created_groups')
+
 class GroupMember(db.Model):
     __tablename__ = 'group_member'
     id = db.Column(db.Integer, primary_key=True)
@@ -156,9 +158,6 @@ class UpdateGroupForm(FlaskForm):
     name = StringField('Group Name', validators=[DataRequired(), Length(min=2, max=100)])
     description = TextAreaField('Description')
     submit = SubmitField('Update Group')
-
-# Initialize database with app
-db.init_app(app)
 
 @login_manager.user_loader
 def load_user(user_id):
