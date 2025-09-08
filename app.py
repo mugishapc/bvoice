@@ -1,8 +1,10 @@
-# Eventlet patch must be first
+# --- Eventlet patch must be first ---
 import eventlet
 eventlet.monkey_patch()
 
-import os, gc, json
+import os
+import gc
+import json
 from datetime import datetime
 from flask import Flask, render_template, url_for, flash, redirect, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -17,6 +19,7 @@ from wtforms import StringField, PasswordField, SubmitField, BooleanField, TextA
 from wtforms.validators import DataRequired, Length, Email, EqualTo
 import psutil
 from pywebpush import webpush, WebPushException
+from flask_migrate import Migrate
 
 # --- Flask App ---
 app = Flask(__name__)
@@ -30,11 +33,11 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # --- Extensions ---
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)  # <-- Enable Flask-Migrate
 bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 login_manager.login_message_category = 'info'
-
 socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*", ping_timeout=60, ping_interval=25)
 
 # --- VAPID Keys ---
@@ -42,9 +45,8 @@ VAPID_PRIVATE_KEY = "RMjjSP6S-RN6U49FPbbDGWZ_dpxI5hlwZlKQHThgBxc"
 VAPID_PUBLIC_KEY  = "ivyTN3460JvPh_DZvkiNpYr2i5M4E7FZBCI_i7TWLBkZ9NkqGoN1qWlEr-54rGDOJTNrPGO_hWVjvTR_iVF9mQ"
 VAPID_CLAIMS = {"sub": "mailto:mpc0679@gmail.com"}
 
-# Define models here to avoid circular imports
+# --- Models ---
 class User(db.Model):
-    __tablename__ = 'user'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(20), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -54,45 +56,33 @@ class User(db.Model):
     last_seen = db.Column(db.DateTime, default=datetime.utcnow)
     push_subscription = db.Column(db.Text, nullable=True)
     
-    # Relationships
     sent_messages = db.relationship('Message', foreign_keys='Message.sender_id', backref='sender', lazy=True)
     received_messages = db.relationship('Message', foreign_keys='Message.receiver_id', backref='receiver', lazy=True)
     groups = db.relationship('GroupMember', back_populates='user')
     reactions = db.relationship('MessageReaction', back_populates='user')
     
-    def is_authenticated(self):
-        return True
-    
-    def is_active(self):
-        return True
-    
-    def is_anonymous(self):
-        return False
-    
-    def get_id(self):
-        return str(self.id)
+    def is_authenticated(self): return True
+    def is_active(self): return True
+    def is_anonymous(self): return False
+    def get_id(self): return str(self.id)
 
 class Message(db.Model):
-    __tablename__ = 'message'
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     is_read = db.Column(db.Boolean, default=False)
-    message_type = db.Column(db.String(20), default='text')  # text, image, file, etc.
+    message_type = db.Column(db.String(20), default='text')
     file_path = db.Column(db.String(200), nullable=True)
     
-    # Foreign keys
     sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     receiver_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=True)
     reply_to_id = db.Column(db.Integer, db.ForeignKey('message.id'), nullable=True)
     
-    # Relationships
     reply_to = db.relationship('Message', remote_side=[id], backref='replies')
     reactions = db.relationship('MessageReaction', back_populates='message')
 
 class Group(db.Model):
-    __tablename__ = 'group'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True)
@@ -100,35 +90,29 @@ class Group(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     
-    # Relationships
     members = db.relationship('GroupMember', back_populates='group')
     messages = db.relationship('Message', backref='group', lazy=True)
     creator = db.relationship('User', backref='created_groups')
 
 class GroupMember(db.Model):
-    __tablename__ = 'group_member'
     id = db.Column(db.Integer, primary_key=True)
     group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     joined_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_admin = db.Column(db.Boolean, default=False)
     
-    # Relationships
     group = db.relationship('Group', back_populates='members')
     user = db.relationship('User', back_populates='groups')
 
 class MessageReaction(db.Model):
-    __tablename__ = 'message_reaction'
     id = db.Column(db.Integer, primary_key=True)
     message_id = db.Column(db.Integer, db.ForeignKey('message.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     emoji = db.Column(db.String(10), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
-    # Relationships
     message = db.relationship('Message', back_populates='reactions')
     user = db.relationship('User', back_populates='reactions')
-
 # Define forms
 class RegistrationForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=2, max=20)])
@@ -826,10 +810,22 @@ def health():
         'cpu_percent': process.cpu_percent()
     })
 
+def save_picture(form_picture):
+    random_hex = os.urandom(8).hex()
+    _, f_ext = os.path.splitext(form_picture.filename)
+    picture_fn = random_hex + f_ext
+    picture_path = os.path.join(app.config['UPLOAD_FOLDER'], picture_fn)
+    i = Image.open(form_picture)
+    i.thumbnail((125, 125))
+    i.save(picture_path)
+    return picture_fn
+
+
 # Create database tables
 with app.app_context():
     db.create_all()
 
+# --- Run ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, debug=True, host="0.0.0.0", port=port)
