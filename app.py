@@ -21,6 +21,9 @@ import psutil
 from pywebpush import webpush, WebPushException
 from flask_migrate import Migrate
 from dotenv import load_dotenv
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
+from time import sleep
 
 # --- Load environment variables ---
 load_dotenv()
@@ -36,6 +39,15 @@ if database_url:
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    
+    # Add connection pool settings for PostgreSQL
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_recycle': 300,
+        'pool_timeout': 30,
+        'pool_size': 5,
+        'max_overflow': 10,
+        'pool_pre_ping': True  # Important for connection health checks
+    }
     print("Using PostgreSQL database from DATABASE_URL")
 else:
     # Fallback to SQLite for local development
@@ -164,7 +176,14 @@ class UpdateGroupForm(FlaskForm):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    try:
+        return User.query.get(int(user_id))
+    except OperationalError:
+        db.session.rollback()
+        return None
+    except Exception as e:
+        print(f"Error loading user: {e}")
+        return None
 
 # --- Memory Management ---
 @app.after_request
@@ -175,7 +194,17 @@ def after_request(response):
 @app.teardown_appcontext
 def shutdown_session(exception=None):
     db.session.remove()
-    
+
+# Database connection health check
+@app.before_request
+def before_request():
+    try:
+        # Check if database connection is alive
+        db.session.execute(text('SELECT 1'))
+    except Exception as e:
+        db.session.rollback()
+        print(f"Database connection error: {e}")
+
 # Routes
 @app.route('/')
 def index():
@@ -403,17 +432,23 @@ def uploaded_file(filename):
 def handle_connect():
     if current_user.is_authenticated:
         join_room(str(current_user.id))
+        current_user.status = 'online'
         current_user.last_seen = datetime.utcnow()
         db.session.commit()
-        emit('user_status', {'user_id': current_user.id, 'online': True}, broadcast=True)
+        emit('user_status', {'user_id': current_user.id, 'status': 'online'}, broadcast=True)
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    if current_user.is_authenticated:
-        leave_room(str(current_user.id))
-        current_user.last_seen = datetime.utcnow()
-        db.session.commit()
-        emit('user_status', {'user_id': current_user.id, 'online': False}, broadcast=True)
+    try:
+        if current_user.is_authenticated:
+            leave_room(str(current_user.id))
+            current_user.status = 'offline'
+            current_user.last_seen = datetime.utcnow()
+            db.session.commit()
+            emit('user_status', {'user_id': current_user.id, 'status': 'offline'}, broadcast=True)
+    except Exception as e:
+        print(f"Disconnect error: {e}")
+        db.session.rollback()
 
 # Combined send_message handler
 @socketio.on('send_message')
@@ -846,6 +881,14 @@ with app.app_context():
     except Exception as e:
         print(f"Error creating database tables: {e}")
         print("Please check your DATABASE_URL in the .env file")
+
+# SocketIO error handler
+@socketio.on_error_default
+def default_error_handler(e):
+    print(f"SocketIO error: {e}")
+    # Handle different types of errors appropriately
+    if isinstance(e, OperationalError):
+        db.session.rollback()
 
 # --- Run ---
 if __name__ == "__main__":
