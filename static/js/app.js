@@ -1,3 +1,8 @@
+// Read user data from the JSON element
+const userDataElement = document.getElementById('user-data');
+const userData = userDataElement ? JSON.parse(userDataElement.textContent) : {};
+const current_user_id = userData.current_user_id || null;
+
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize Socket.IO
     const socket = io();
@@ -25,6 +30,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Media recorder for voice messages
     let mediaRecorder;
     let audioChunks = [];
+    let currentReplyMessageId = null;
     
     // Event listeners for chat items
     chatItems.forEach(item => {
@@ -71,6 +77,14 @@ document.addEventListener('DOMContentLoaded', function() {
             messageData.receiver_id = currentChat.id;
         } else {
             messageData.group_id = currentChat.id;
+        }
+        
+        // Add reply if there's a current reply message
+        const replyIndicator = document.querySelector('.reply-indicator');
+        if (replyIndicator && currentReplyMessageId) {
+            messageData.reply_to_id = currentReplyMessageId;
+            replyIndicator.remove();
+            currentReplyMessageId = null;
         }
         
         socket.emit('send_message', messageData);
@@ -219,6 +233,11 @@ document.addEventListener('DOMContentLoaded', function() {
         updateUserStatus(data);
     });
     
+    socket.on('reaction_update', function(data) {
+        // Update message reactions
+        updateMessageReaction(data);
+    });
+    
     // Load messages for current chat
     function loadMessages() {
         let url;
@@ -243,12 +262,24 @@ document.addEventListener('DOMContentLoaded', function() {
     function addMessageToChat(message) {
         const messageEl = document.createElement('div');
         messageEl.classList.add('message');
+        messageEl.dataset.messageId = message.id;
         
         // Check if message is from current user
         const isSent = message.sender_id == current_user_id;
         messageEl.classList.add(isSent ? 'sent' : 'received');
         
         let messageContent = message.content;
+        
+        // Add reply indicator if this is a reply
+        if (message.reply_to) {
+            messageContent = `
+                <div class="reply-indicator">
+                    <div class="reply-sender">Replying to ${message.reply_to.sender_name}</div>
+                    <div class="reply-content">${message.reply_to.content}</div>
+                </div>
+                ${messageContent}
+            `;
+        }
         
         // Handle different message types
         if (message.message_type !== 'text') {
@@ -283,6 +314,57 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="message-content">${messageContent}</div>
             <div class="message-time">${timestamp}</div>
         `;
+        
+        // Add reactions if any
+        if (message.reactions && message.reactions.length > 0) {
+            const reactionsContainer = document.createElement('div');
+            reactionsContainer.className = 'message-reactions';
+            
+            // Group reactions by emoji
+            const reactionCounts = {};
+            message.reactions.forEach(reaction => {
+                if (!reactionCounts[reaction.emoji]) {
+                    reactionCounts[reaction.emoji] = {
+                        count: 0,
+                        users: []
+                    };
+                }
+                reactionCounts[reaction.emoji].count++;
+                reactionCounts[reaction.emoji].users.push(reaction.user_name);
+            });
+            
+            // Create reaction elements
+            for (const [emoji, data] of Object.entries(reactionCounts)) {
+                const reactionEl = document.createElement('span');
+                reactionEl.className = 'reaction';
+                reactionEl.innerHTML = `
+                    <span class="reaction-emoji">${emoji}</span>
+                    <span class="reaction-count">${data.count}</span>
+                `;
+                reactionEl.title = data.users.join(', ');
+                reactionsContainer.appendChild(reactionEl);
+            }
+            
+            messageEl.appendChild(reactionsContainer);
+        }
+        
+        // Add context menu for messages
+        messageEl.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+            showMessageContextMenu(e, message);
+        });
+        
+        // Add touch event for mobile
+        let touchTimeout;
+        messageEl.addEventListener('touchstart', function() {
+            touchTimeout = setTimeout(() => {
+                showMessageContextMenu({pageX: 50, pageY: 50}, message);
+            }, 500);
+        });
+        
+        messageEl.addEventListener('touchend', function() {
+            clearTimeout(touchTimeout);
+        });
         
         messagesContainer.appendChild(messageEl);
         scrollToBottom();
@@ -344,6 +426,16 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log(`User ${data.user_id} is ${data.online ? 'online' : 'offline'}`);
     }
     
+    // Update message reaction
+    function updateMessageReaction(data) {
+        const messageEl = document.querySelector(`[data-message-id="${data.message_id}"]`);
+        if (!messageEl) return;
+        
+        // This is a simplified implementation
+        // In a real app, you'd want to properly update the reaction counts
+        console.log('Reaction update:', data);
+    }
+    
     // Helper function to get message type from file type
     function getMessageType(fileType) {
         if (fileType.startsWith('image/')) {
@@ -382,9 +474,151 @@ document.addEventListener('DOMContentLoaded', function() {
             socket.emit('typing', data);
         }, 1000);
     });
+    
+    // Show context menu for messages
+    function showMessageContextMenu(e, message) {
+        // Remove any existing context menu
+        const existingMenu = document.querySelector('.context-menu');
+        if (existingMenu) {
+            existingMenu.remove();
+        }
+        
+        const isOwnMessage = message.sender_id == current_user_id;
+        const menu = document.createElement('div');
+        menu.className = 'context-menu';
+        menu.style.left = e.pageX + 'px';
+        menu.style.top = e.pageY + 'px';
+        
+        // Reply option
+        const replyOption = document.createElement('div');
+        replyOption.className = 'context-menu-item';
+        replyOption.innerHTML = '↩️ Reply';
+        replyOption.addEventListener('click', function() {
+            replyToMessage(message);
+            menu.remove();
+        });
+        menu.appendChild(replyOption);
+        
+        // React option
+        const reactOption = document.createElement('div');
+        reactOption.className = 'context-menu-item';
+        reactOption.innerHTML = '😊 React';
+        reactOption.addEventListener('click', function() {
+            showReactionPicker(e, message);
+            menu.remove();
+        });
+        menu.appendChild(reactOption);
+        
+        // Delete option (only for own messages)
+        if (isOwnMessage) {
+            const deleteOption = document.createElement('div');
+            deleteOption.className = 'context-menu-item';
+            deleteOption.innerHTML = '🗑️ Delete';
+            deleteOption.addEventListener('click', function() {
+                deleteMessage(message.id);
+                menu.remove();
+            });
+            menu.appendChild(deleteOption);
+        }
+        
+        document.body.appendChild(menu);
+        
+        // Close menu when clicking elsewhere
+        const closeMenu = function() {
+            menu.remove();
+            document.removeEventListener('click', closeMenu);
+        };
+        
+        setTimeout(() => {
+            document.addEventListener('click', closeMenu);
+        }, 100);
+    }
+    
+    // Show reaction picker
+    function showReactionPicker(e, message) {
+        const reactions = ['👍', '❤️', '😂', '😮', '😢', '😡'];
+        const picker = document.createElement('div');
+        picker.className = 'context-menu';
+        picker.style.left = e.pageX + 'px';
+        picker.style.top = (e.pageY - 40) + 'px';
+        
+        reactions.forEach(emoji => {
+            const option = document.createElement('div');
+            option.className = 'context-menu-item';
+            option.textContent = emoji;
+            option.addEventListener('click', function() {
+                reactToMessage(message.id, emoji);
+                picker.remove();
+            });
+            picker.appendChild(option);
+        });
+        
+        document.body.appendChild(picker);
+        
+        // Close picker when clicking elsewhere
+        const closePicker = function() {
+            picker.remove();
+            document.removeEventListener('click', closePicker);
+        };
+        
+        setTimeout(() => {
+            document.addEventListener('click', closePicker);
+        }, 100);
+    }
+    
+    // React to a message
+    function reactToMessage(messageId, emoji) {
+        fetch(`/message/${messageId}/react`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ emoji: emoji })
+        })
+        .then(response => response.json())
+        .then(data => {
+            // The socket event will update the UI
+        });
+    }
+    
+    // Reply to a message
+    function replyToMessage(message) {
+        messageInput.value = '';
+        messageInput.focus();
+        
+        // Create a reply indicator
+        const replyIndicator = document.createElement('div');
+        replyIndicator.className = 'reply-indicator';
+        replyIndicator.innerHTML = `
+            <div class="reply-sender">Replying to ${message.sender_name}</div>
+            <div class="reply-content">${message.content}</div>
+            <button class="cancel-reply">×</button>
+        `;
+        
+        // Remove any existing reply indicator
+        const existingIndicator = document.querySelector('.reply-indicator');
+        if (existingIndicator) {
+            existingIndicator.remove();
+        }
+        
+        messageInput.parentNode.insertBefore(replyIndicator, messageInput);
+        
+        // Cancel reply
+        replyIndicator.querySelector('.cancel-reply').addEventListener('click', function() {
+            replyIndicator.remove();
+            currentReplyMessageId = null;
+        });
+        
+        // Store the message being replied to
+        currentReplyMessageId = message.id;
+    }
+    
+    // Delete a message
+    function deleteMessage(messageId) {
+        // This would be implemented with a proper API endpoint
+        console.log('Delete message:', messageId);
+    }
 });
-
-// Add this to your app.js
 
 // Request notification permission
 function requestNotificationPermission() {
@@ -420,7 +654,7 @@ function registerPushNotifications() {
         navigator.serviceWorker.ready.then(function(registration) {
             registration.pushManager.subscribe({
                 userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array('YOUR_PUBLIC_VAPID_KEY_HERE')
+                applicationServerKey: urlBase64ToUint8Array('ivyTN3460JvPh_DZvkiNpYr2i5M4E7FZBCI_i7TWLBkZ9NkqGoN1qWlEr-54rGDOJTNrPGO_hWVjvTR_iVF9mQ')
             }).then(function(subscription) {
                 // Send subscription to server
                 fetch('/push_subscription', {
@@ -455,269 +689,3 @@ function urlBase64ToUint8Array(base64String) {
 
 // Call this when the user logs in
 requestNotificationPermission();
-
-
-// Update the addMessageToChat function to handle reactions and replies
-function addMessageToChat(message) {
-    const messageEl = document.createElement('div');
-    messageEl.classList.add('message');
-    messageEl.dataset.messageId = message.id;
-    
-    // Check if message is from current user
-    const isSent = message.sender_id == current_user_id;
-    messageEl.classList.add(isSent ? 'sent' : 'received');
-    
-    let messageContent = message.content;
-    
-    // Add reply indicator if this is a reply
-    if (message.reply_to) {
-        messageContent = `
-            <div class="reply-indicator">
-                <div class="reply-sender">Replying to ${message.reply_to.sender_name}</div>
-                <div class="reply-content">${message.reply_to.content}</div>
-            </div>
-            ${messageContent}
-        `;
-    }
-    
-    // Handle different message types
-    if (message.message_type !== 'text') {
-        if (message.message_type === 'image') {
-            messageContent = `<div class="media-message">
-                <img src="${message.file_path}" alt="Image">
-                <p>${message.content}</p>
-            </div>`;
-        } else if (message.message_type === 'audio') {
-            messageContent = `<div class="media-message">
-                <audio controls>
-                    <source src="${message.file_path}" type="audio/webm">
-                    Your browser does not support the audio element.
-                </audio>
-                <p>${message.content}</p>
-            </div>`;
-        } else if (message.message_type === 'document') {
-            messageContent = `<div class="media-message">
-                <a href="${message.file_path}" class="file-download" download>
-                    📄 ${message.content}
-                </a>
-            </div>`;
-        }
-    }
-    
-    const timestamp = new Date(message.timestamp).toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-    });
-    
-    messageEl.innerHTML = `
-        <div class="message-content">${messageContent}</div>
-        <div class="message-time">${timestamp}</div>
-    `;
-    
-    // Add reactions if any
-    if (message.reactions && message.reactions.length > 0) {
-        const reactionsContainer = document.createElement('div');
-        reactionsContainer.className = 'message-reactions';
-        
-        // Group reactions by emoji
-        const reactionCounts = {};
-        message.reactions.forEach(reaction => {
-            if (!reactionCounts[reaction.emoji]) {
-                reactionCounts[reaction.emoji] = {
-                    count: 0,
-                    users: []
-                };
-            }
-            reactionCounts[reaction.emoji].count++;
-            reactionCounts[reaction.emoji].users.push(reaction.user_name);
-        });
-        
-        // Create reaction elements
-        for (const [emoji, data] of Object.entries(reactionCounts)) {
-            const reactionEl = document.createElement('span');
-            reactionEl.className = 'reaction';
-            reactionEl.innerHTML = `
-                <span class="reaction-emoji">${emoji}</span>
-                <span class="reaction-count">${data.count}</span>
-            `;
-            reactionEl.title = data.users.join(', ');
-            reactionsContainer.appendChild(reactionEl);
-        }
-        
-        messageEl.appendChild(reactionsContainer);
-    }
-    
-    // Add context menu for messages
-    messageEl.addEventListener('contextmenu', function(e) {
-        e.preventDefault();
-        showMessageContextMenu(e, message);
-    });
-    
-    messagesContainer.appendChild(messageEl);
-    scrollToBottom();
-}
-
-// Show context menu for messages
-function showMessageContextMenu(e, message) {
-    // Remove any existing context menu
-    const existingMenu = document.querySelector('.context-menu');
-    if (existingMenu) {
-        existingMenu.remove();
-    }
-    
-    const isOwnMessage = message.sender_id == current_user_id;
-    const menu = document.createElement('div');
-    menu.className = 'context-menu';
-    menu.style.left = e.pageX + 'px';
-    menu.style.top = e.pageY + 'px';
-    
-    // Reply option
-    const replyOption = document.createElement('div');
-    replyOption.className = 'context-menu-item';
-    replyOption.innerHTML = '<img src="/static/icons/reply-icon.png" alt="Reply"> Reply';
-    replyOption.addEventListener('click', function() {
-        replyToMessage(message);
-        menu.remove();
-    });
-    menu.appendChild(replyOption);
-    
-    // React option
-    const reactOption = document.createElement('div');
-    reactOption.className = 'context-menu-item';
-    reactOption.innerHTML = '<img src="/static/icons/react-icon.png" alt="React"> React';
-    reactOption.addEventListener('click', function() {
-        showReactionPicker(e, message);
-        menu.remove();
-    });
-    menu.appendChild(reactOption);
-    
-    // Delete option (only for own messages)
-    if (isOwnMessage) {
-        const deleteOption = document.createElement('div');
-        deleteOption.className = 'context-menu-item';
-        deleteOption.innerHTML = '<img src="/static/icons/delete-icon.png" alt="Delete"> Delete';
-        deleteOption.addEventListener('click', function() {
-            deleteMessage(message.id);
-            menu.remove();
-        });
-        menu.appendChild(deleteOption);
-    }
-    
-    document.body.appendChild(menu);
-    
-    // Close menu when clicking elsewhere
-    const closeMenu = function() {
-        menu.remove();
-        document.removeEventListener('click', closeMenu);
-    };
-    
-    setTimeout(() => {
-        document.addEventListener('click', closeMenu);
-    }, 100);
-}
-
-// Show reaction picker
-function showReactionPicker(e, message) {
-    const reactions = ['👍', '❤️', '😂', '😮', '😢', '😡'];
-    const picker = document.createElement('div');
-    picker.className = 'context-menu';
-    picker.style.left = e.pageX + 'px';
-    picker.style.top = (e.pageY - 40) + 'px';
-    
-    reactions.forEach(emoji => {
-        const option = document.createElement('div');
-        option.className = 'context-menu-item';
-        option.textContent = emoji;
-        option.addEventListener('click', function() {
-            reactToMessage(message.id, emoji);
-            picker.remove();
-        });
-        picker.appendChild(option);
-    });
-    
-    document.body.appendChild(picker);
-    
-    // Close picker when clicking elsewhere
-    const closePicker = function() {
-        picker.remove();
-        document.removeEventListener('click', closePicker);
-    };
-    
-    setTimeout(() => {
-        document.addEventListener('click', closePicker);
-    }, 100);
-}
-
-// React to a message
-function reactToMessage(messageId, emoji) {
-    fetch(`/message/${messageId}/react`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ emoji: emoji })
-    })
-    .then(response => response.json())
-    .then(data => {
-        // The socket event will update the UI
-    });
-}
-
-// Reply to a message
-function replyToMessage(message) {
-    messageInput.value = '';
-    messageInput.focus();
-    
-    // Create a reply indicator
-    const replyIndicator = document.createElement('div');
-    replyIndicator.className = 'reply-indicator';
-    replyIndicator.innerHTML = `
-        <div class="reply-sender">Replying to ${message.sender_name}</div>
-        <div class="reply-content">${message.content}</div>
-        <button class="cancel-reply">×</button>
-    `;
-    
-    // Remove any existing reply indicator
-    const existingIndicator = document.querySelector('.reply-indicator');
-    if (existingIndicator) {
-        existingIndicator.remove();
-    }
-    
-    messageInput.parentNode.insertBefore(replyIndicator, messageInput);
-    
-    // Cancel reply
-    replyIndicator.querySelector('.cancel-reply').addEventListener('click', function() {
-        replyIndicator.remove();
-    });
-    
-    // Store the message being replied to
-    currentReplyMessageId = message.id;
-}
-
-// Update the sendMessage function to handle replies
-function sendMessage() {
-    const content = messageInput.value.trim();
-    if (!content || !currentChat.id) return;
-    
-    const messageData = {
-        content: content,
-        message_type: 'text'
-    };
-    
-    if (currentChat.type === 'user') {
-        messageData.receiver_id = currentChat.id;
-    } else {
-        messageData.group_id = currentChat.id;
-    }
-    
-    // Add reply if there's a current reply message
-    const replyIndicator = document.querySelector('.reply-indicator');
-    if (replyIndicator && currentReplyMessageId) {
-        messageData.reply_to_id = currentReplyMessageId;
-        replyIndicator.remove();
-        currentReplyMessageId = null;
-    }
-    
-    socket.emit('send_message', messageData);
-    messageInput.value = '';
-}

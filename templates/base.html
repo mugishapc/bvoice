@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>BI VOICE - {% block title %}{% endblock %}</title>
 
     <!-- Styles -->
@@ -16,6 +16,9 @@
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192x192.png') }}">
     <meta name="apple-mobile-web-app-status-bar" content="#128C7E">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    
+    <!-- Android Chrome -->
+    <meta name="mobile-web-app-capable" content="yes">
 </head>
 <body>
     <!-- Flash messages -->
@@ -34,13 +37,21 @@
 
     <!-- Socket.IO -->
     <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    
+    <!-- Global variables passed from Flask -->
+    <script id="user-data" type="application/json">
+        {
+            "current_user_id": {% if current_user.is_authenticated %}{{ current_user.id }}{% else %}null{% endif %}
+        }
+    </script>
+    
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 
     <!-- Service Worker + PWA Install -->
     <script>
         // Register service worker
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('{{ url_for("static", filename="service-worker.js") }}')
+            navigator.serviceWorker.register('{{ url_for("service_worker") }}')
                 .then(function(registration) {
                     console.log('✅ Service Worker registered with scope:', registration.scope);
                 })
@@ -72,6 +83,22 @@
                 }
             }, 3000);
         });
+        
+        // Prevent zoom on mobile
+        document.addEventListener('touchstart', function(event) {
+            if (event.touches.length > 1) {
+                event.preventDefault();
+            }
+        }, { passive: false });
+        
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', function(event) {
+            const now = (new Date()).getTime();
+            if (now - lastTouchEnd <= 300) {
+                event.preventDefault();
+            }
+            lastTouchEnd = now;
+        }, false);
     </script>
 </body>
 </html>
