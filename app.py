@@ -20,11 +20,29 @@ from wtforms.validators import DataRequired, Length, Email, EqualTo
 import psutil
 from pywebpush import webpush, WebPushException
 from flask_migrate import Migrate
+from dotenv import load_dotenv
+
+# --- Load environment variables ---
+load_dotenv()
 
 # --- Flask App ---
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'replace_with_secure_secret!')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'fallback_secret_key_change_in_production')
+
+# Use DATABASE_URL from environment
+database_url = os.environ.get('DATABASE_URL')
+if database_url:
+    # Parse and fix the connection string if needed
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    print("Using PostgreSQL database from DATABASE_URL")
+else:
+    # Fallback to SQLite for local development
+    basedir = os.path.abspath(os.path.dirname(__file__))
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'app.db')
+    print("Using SQLite database as fallback")
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = os.path.join('static', 'uploads')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
@@ -41,8 +59,8 @@ login_manager.login_message_category = 'info'
 socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*", ping_timeout=60, ping_interval=25)
 
 # --- VAPID Keys ---
-VAPID_PRIVATE_KEY = "RMjjSP6S-RN6U49FPbbDGWZ_dpxI5hlwZlKQHThgBxc"
-VAPID_PUBLIC_KEY  = "ivyTN3460JvPh_DZvkiNpYr2i5M4E7FZBCI_i7TWLBkZ9NkqGoN1qWlEr-54rGDOJTNrPGO_hWVjvTR_iVF9mQ"
+VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY', "RMjjSP6S-RN6U49FPbbDGWZ_dpxI5hlwZlKQHThgBxc")
+VAPID_PUBLIC_KEY = os.environ.get('VAPID_PUBLIC_KEY', "ivyTN3460JvPh_DZvkiNpYr2i5M4E7FZBCI_i7TWLBkZ9NkqGoN1qWlEr-54rGDOJTNrPGO_hWVjvTR_iVF9mQ")
 VAPID_CLAIMS = {"sub": "mailto:mpc0679@gmail.com"}
 
 # --- Models ---
@@ -157,6 +175,7 @@ def after_request(response):
 @app.teardown_appcontext
 def shutdown_session(exception=None):
     db.session.remove()
+    
 # Routes
 @app.route('/')
 def index():
@@ -789,8 +808,6 @@ def update_group(group_id):
 
     return render_template('update_group.html', form=form, group=group)
 
-
-# Add this with your other routes
 @app.route('/icon-<size>.png')
 def serve_icon(size):
     """Serve PWA icons"""
@@ -821,10 +838,14 @@ def save_picture(form_picture):
     i.save(picture_path)
     return picture_fn
 
-
 # Create database tables
 with app.app_context():
-    db.create_all()
+    try:
+        db.create_all()
+        print("Database tables created successfully!")
+    except Exception as e:
+        print(f"Error creating database tables: {e}")
+        print("Please check your DATABASE_URL in the .env file")
 
 # --- Run ---
 if __name__ == "__main__":
