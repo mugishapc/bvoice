@@ -33,7 +33,7 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # --- Extensions ---
 db = SQLAlchemy(app)
-migrate = Migrate(app, db)  # <-- Enable Flask-Migrate
+migrate = Migrate(app, db)
 bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
@@ -113,6 +113,7 @@ class MessageReaction(db.Model):
     
     message = db.relationship('Message', back_populates='reactions')
     user = db.relationship('User', back_populates='reactions')
+
 # Define forms
 class RegistrationForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=2, max=20)])
@@ -156,7 +157,6 @@ def after_request(response):
 @app.teardown_appcontext
 def shutdown_session(exception=None):
     db.session.remove()
-
 # Routes
 @app.route('/')
 def index():
@@ -810,6 +810,7 @@ def health():
         'cpu_percent': process.cpu_percent()
     })
 
+# --- Helper Functions ---
 def save_picture(form_picture):
     random_hex = os.urandom(8).hex()
     _, f_ext = os.path.splitext(form_picture.filename)
