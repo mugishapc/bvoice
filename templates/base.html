@@ -4,14 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BI VOICE - {% block title %}{% endblock %}</title>
+
+    <!-- Styles -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <!-- PWA Manifest -->
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <meta name="theme-color" content="#128C7E">
+
+    <!-- iOS Support -->
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192x192.png') }}">
     <meta name="apple-mobile-web-app-status-bar" content="#128C7E">
     <meta name="apple-mobile-web-app-capable" content="yes">
 </head>
 <body>
+    <!-- Flash messages -->
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}
@@ -21,41 +28,47 @@
             {% endfor %}
         {% endif %}
     {% endwith %}
-    
+
+    <!-- Page content -->
     {% block content %}{% endblock %}
-    
+
+    <!-- Socket.IO -->
     <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-    
+
+    <!-- Service Worker + PWA Install -->
     <script>
-        // Register service worker for PWA
+        // Register service worker
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('{{ url_for("static", filename="service-worker.js") }}')
                 .then(function(registration) {
-                    console.log('Service Worker registered with scope:', registration.scope);
-                }).catch(function(error) {
-                    console.log('Service Worker registration failed:', error);
+                    console.log('✅ Service Worker registered with scope:', registration.scope);
+                })
+                .catch(function(error) {
+                    console.log('❌ Service Worker registration failed:', error);
                 });
         }
-        
-        // Prompt user to install PWA
+
+        // Handle PWA install prompt
         let deferredPrompt;
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
             deferredPrompt = e;
-            
-            // Show install prompt (you can customize this UI)
+
+            // Ask user after 3s
             setTimeout(() => {
-                if (deferredPrompt && confirm('Install BI VOICE for a better experience?')) {
-                    deferredPrompt.prompt();
-                    deferredPrompt.userChoice.then((choiceResult) => {
-                        if (choiceResult.outcome === 'accepted') {
-                            console.log('User accepted the install prompt');
-                        } else {
-                            console.log('User dismissed the install prompt');
-                        }
-                        deferredPrompt = null;
-                    });
+                if (deferredPrompt) {
+                    if (confirm('📲 Install BI VOICE for a better experience?')) {
+                        deferredPrompt.prompt();
+                        deferredPrompt.userChoice.then((choiceResult) => {
+                            if (choiceResult.outcome === 'accepted') {
+                                console.log('User accepted the install prompt');
+                            } else {
+                                console.log('User dismissed the install prompt');
+                            }
+                            deferredPrompt = null;
+                        });
+                    }
                 }
             }, 3000);
         });
