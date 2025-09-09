@@ -1,1 +1,1 @@
-web: gunicorn --worker-class eventlet -w 1 --timeout 120 app:app
+web: gunicorn --worker-class eventlet -w 1 --timeout 120 --log-level debug app:app
