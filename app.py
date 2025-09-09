@@ -430,10 +430,9 @@ def handle_connect():
         emit('user_status', {'user_id': current_user.id, 'status': 'online'}, broadcast=True)
 
 @socketio.on('disconnect')
-def handle_disconnect():
+def handle_disconnect(*args):
     if current_user.is_authenticated:
         leave_room(str(current_user.id))
-        # Use the background task with proper app context
         socketio.start_background_task(update_user_status_bg, current_user.id, 'offline')
         emit('user_status', {'user_id': current_user.id, 'status': 'offline'}, broadcast=True)
 
