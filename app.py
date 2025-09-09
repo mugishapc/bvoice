@@ -425,23 +425,17 @@ def uploaded_file(filename):
 def handle_connect():
     if current_user.is_authenticated:
         join_room(str(current_user.id))
-        current_user.status = 'online'
-        current_user.last_seen = datetime.utcnow()
-        db.session.commit()
+        # Use the background task with proper app context
+        socketio.start_background_task(update_user_status_bg, current_user.id, 'online')
         emit('user_status', {'user_id': current_user.id, 'status': 'online'}, broadcast=True)
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    try:
-        if current_user.is_authenticated:
-            leave_room(str(current_user.id))
-            current_user.status = 'offline'
-            current_user.last_seen = datetime.utcnow()
-            db.session.commit()
-            emit('user_status', {'user_id': current_user.id, 'status': 'offline'}, broadcast=True)
-    except Exception as e:
-        print(f"Disconnect error: {e}")
-        db.session.rollback()
+    if current_user.is_authenticated:
+        leave_room(str(current_user.id))
+        # Use the background task with proper app context
+        socketio.start_background_task(update_user_status_bg, current_user.id, 'offline')
+        emit('user_status', {'user_id': current_user.id, 'status': 'offline'}, broadcast=True)
 
 # Combined send_message handler
 @socketio.on('send_message')
@@ -878,6 +872,13 @@ def update_user_status_bg(user_id, status):
         print(f"Error updating user status: {e}")
         db.session.rollback()
 
+# SocketIO error handler
+@socketio.on_error_default
+def default_error_handler(e):
+    print(f"SocketIO error: {e}")
+    # Handle different types of errors appropriately
+    if isinstance(e, OperationalError):
+        db.session.rollback()
 
 # Create database tables
 with app.app_context():
@@ -887,33 +888,6 @@ with app.app_context():
     except Exception as e:
         print(f"Error creating database tables: {e}")
         print("Please check your DATABASE_URL in the .env file")
-
-
-@socketio.on('connect')
-def handle_connect():
-    if current_user.is_authenticated:
-        join_room(str(current_user.id))
-        # Use the corrected background task with proper app context
-        socketio.start_background_task(update_user_status_bg, current_user.id, 'online')
-        emit('user_status', {'user_id': current_user.id, 'status': 'online'}, broadcast=True)
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    if current_user.is_authenticated:
-        leave_room(str(current_user.id))
-        # Use the corrected background task with proper app context
-        socketio.start_background_task(update_user_status_bg, current_user.id, 'offline')
-        emit('user_status', {'user_id': current_user.id, 'status': 'offline'}, broadcast=True)
-
-
-
-# SocketIO error handler
-@socketio.on_error_default
-def default_error_handler(e):
-    print(f"SocketIO error: {e}")
-    # Handle different types of errors appropriately
-    if isinstance(e, OperationalError):
-        db.session.rollback()
 
 # --- Run ---
 if __name__ == "__main__":
