@@ -23,7 +23,6 @@ from flask_migrate import Migrate
 from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
-from time import sleep
 
 # --- Load environment variables ---
 load_dotenv()
@@ -32,33 +31,26 @@ load_dotenv()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'fallback_secret_key_change_in_production')
 
-# Use DATABASE_URL from environment
+# Database config
 database_url = os.environ.get('DATABASE_URL')
 if database_url:
-    # Parse and fix the connection string if needed
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
-    
-    # Add connection pool settings for PostgreSQL
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'pool_recycle': 300,
         'pool_timeout': 30,
         'pool_size': 5,
         'max_overflow': 10,
-        'pool_pre_ping': True  # Important for connection health checks
+        'pool_pre_ping': True
     }
-    print("Using PostgreSQL database from DATABASE_URL")
 else:
-    # Fallback to SQLite for local development
     basedir = os.path.abspath(os.path.dirname(__file__))
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'app.db')
-    print("Using SQLite database as fallback")
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = os.path.join('static', 'uploads')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
-
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # --- Extensions ---
@@ -68,11 +60,12 @@ bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 login_manager.login_message_category = 'info'
+
 socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*", ping_timeout=60, ping_interval=25)
 
 # --- VAPID Keys ---
-VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY', "RMjjSP6S-RN6U49FPbbDGWZ_dpxI5hlwZlKQHThgBxc")
-VAPID_PUBLIC_KEY = os.environ.get('VAPID_PUBLIC_KEY', "ivyTN3460JvPh_DZvkiNpYr2i5M4E7FZBCI_i7TWLBkZ9NkqGoN1qWlEr-54rGDOJTNrPGO_hWVjvTR_iVF9mQ")
+VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY')
+VAPID_PUBLIC_KEY = os.environ.get('VAPID_PUBLIC_KEY')
 VAPID_CLAIMS = {"sub": "mailto:mpc0679@gmail.com"}
 
 # --- Models ---
@@ -85,12 +78,12 @@ class User(db.Model):
     status = db.Column(db.String(100), nullable=True)
     last_seen = db.Column(db.DateTime, default=datetime.utcnow)
     push_subscription = db.Column(db.Text, nullable=True)
-    
+
     sent_messages = db.relationship('Message', foreign_keys='Message.sender_id', backref='sender', lazy=True)
     received_messages = db.relationship('Message', foreign_keys='Message.receiver_id', backref='receiver', lazy=True)
     groups = db.relationship('GroupMember', back_populates='user')
     reactions = db.relationship('MessageReaction', back_populates='user')
-    
+
     def is_authenticated(self): return True
     def is_active(self): return True
     def is_anonymous(self): return False
@@ -103,12 +96,12 @@ class Message(db.Model):
     is_read = db.Column(db.Boolean, default=False)
     message_type = db.Column(db.String(20), default='text')
     file_path = db.Column(db.String(200), nullable=True)
-    
+
     sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     receiver_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=True)
     reply_to_id = db.Column(db.Integer, db.ForeignKey('message.id'), nullable=True)
-    
+
     reply_to = db.relationship('Message', remote_side=[id], backref='replies')
     reactions = db.relationship('MessageReaction', back_populates='message')
 
@@ -119,7 +112,7 @@ class Group(db.Model):
     profile_picture = db.Column(db.String(20), nullable=True, default='group-default.jpg')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    
+
     members = db.relationship('GroupMember', back_populates='group')
     messages = db.relationship('Message', backref='group', lazy=True)
     creator = db.relationship('User', backref='created_groups')
@@ -130,7 +123,7 @@ class GroupMember(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     joined_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_admin = db.Column(db.Boolean, default=False)
-    
+
     group = db.relationship('Group', back_populates='members')
     user = db.relationship('User', back_populates='groups')
 
@@ -140,7 +133,7 @@ class MessageReaction(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     emoji = db.Column(db.String(10), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
     message = db.relationship('Message', back_populates='reactions')
     user = db.relationship('User', back_populates='reactions')
 
@@ -561,14 +554,11 @@ def save_picture(form_picture):
     _, f_ext = os.path.splitext(form_picture.filename)
     picture_fn = random_hex + f_ext
     picture_path = os.path.join(app.config['UPLOAD_FOLDER'], picture_fn)
-    
-    # Resize image if needed
-    output_size = (125, 125)
     i = Image.open(form_picture)
-    i.thumbnail(output_size)
+    i.thumbnail((125, 125))
     i.save(picture_path)
-    
     return picture_fn
+
 
 # Message reaction routes
 @app.route('/message/<int:message_id>/react', methods=['POST'])
@@ -862,16 +852,24 @@ def health():
         'cpu_percent': process.cpu_percent()
     })
 
-# --- Helper Functions ---
-def save_picture(form_picture):
-    random_hex = os.urandom(8).hex()
-    _, f_ext = os.path.splitext(form_picture.filename)
-    picture_fn = random_hex + f_ext
-    picture_path = os.path.join(app.config['UPLOAD_FOLDER'], picture_fn)
-    i = Image.open(form_picture)
-    i.thumbnail((125, 125))
-    i.save(picture_path)
-    return picture_fn
+# --- SocketIO Background Tasks for DB ---
+def commit_message_bg(message):
+    try:
+        db.session.add(message)
+        db.session.commit()
+    except Exception as e:
+        print(f"DB error in background: {e}")
+        db.session.rollback()
+
+def update_user_status_bg(user, status):
+    try:
+        user.status = status
+        user.last_seen = datetime.utcnow()
+        db.session.commit()
+    except Exception as e:
+        print(f"Error updating user status: {e}")
+        db.session.rollback()
+
 
 # Create database tables
 with app.app_context():
@@ -881,6 +879,23 @@ with app.app_context():
     except Exception as e:
         print(f"Error creating database tables: {e}")
         print("Please check your DATABASE_URL in the .env file")
+
+
+@socketio.on('connect')
+def handle_connect():
+    if current_user.is_authenticated:
+        join_room(str(current_user.id))
+        socketio.start_background_task(update_user_status_bg, current_user, 'online')
+        emit('user_status', {'user_id': current_user.id, 'status': 'online'}, broadcast=True)
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    if current_user.is_authenticated:
+        leave_room(str(current_user.id))
+        socketio.start_background_task(update_user_status_bg, current_user, 'offline')
+        emit('user_status', {'user_id': current_user.id, 'status': 'offline'}, broadcast=True)
+
+
 
 # SocketIO error handler
 @socketio.on_error_default
