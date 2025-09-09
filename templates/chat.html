@@ -5,11 +5,11 @@
 {% block content %}
 <div class="chat-container">
     <!-- Sidebar -->
-    <div class="sidebar">
+    <div class="chat-sidebar">
         <div class="sidebar-header">
             <div class="user-info">
                 <img src="{{ url_for('static', filename='uploads/' + (current_user.profile_picture or 'default.jpg')) }}" 
-                     alt="Profile" class="profile-pic">
+                     alt="Profile" class="avatar">
                 <span>{{ current_user.username }}</span>
             </div>
             <div class="sidebar-actions">
@@ -35,7 +35,7 @@
                     {% for user in users %}
                     <div class="chat-item" data-id="{{ user.id }}" data-type="user">
                         <img src="{{ url_for('static', filename='uploads/' + (user.profile_picture or 'default.jpg')) }}" 
-                             alt="{{ user.username }}" class="profile-pic">
+                             alt="{{ user.username }}" class="avatar">
                         <div class="chat-info">
                             <div class="chat-name">{{ user.username }}</div>
                             <div class="chat-last-message">Click to start chatting</div>
@@ -52,7 +52,7 @@
                     {% for group in groups %}
                     <div class="chat-item" data-id="{{ group.id }}" data-type="group">
                         <img src="{{ url_for('static', filename='uploads/' + (group.profile_picture or 'default-group.jpg')) }}" 
-                             alt="{{ group.name }}" class="profile-pic">
+                             alt="{{ group.name }}" class="avatar">
                         <div class="chat-info">
                             <div class="chat-name">{{ group.name }}</div>
                             <div class="chat-last-message">{{ group.description }}</div>
@@ -60,13 +60,13 @@
                     </div>
                     {% endfor %}
                 </div>
-                <a href="{{ url_for('create_group') }}" class="create-group-btn">Create New Group</a>
+                <a href="{{ url_for('create_group') }}" class="create-group-btn">+ Create New Group</a>
             </div>
         </div>
     </div>
     
     <!-- Chat area -->
-    <div class="chat-area">
+    <div class="chat-main">
         <div class="chat-placeholder">
             <div class="placeholder-content">
                 <img src="{{ url_for('static', filename='icons/chat-icon.png') }}" alt="Chat">
@@ -78,7 +78,7 @@
         <div class="active-chat" style="display: none;">
             <div class="chat-header">
                 <div class="chat-partner-info">
-                    <img id="chat-partner-pic" src="" alt="Profile" class="profile-pic">
+                    <img id="chat-partner-pic" src="" alt="Profile" class="avatar">
                     <div>
                         <div id="chat-partner-name"></div>
                         <div id="chat-partner-status"></div>
