@@ -855,17 +855,25 @@ def health():
 # --- SocketIO Background Tasks for DB ---
 def commit_message_bg(message):
     try:
-        db.session.add(message)
-        db.session.commit()
+        with app.app_context():
+            db.session.add(message)
+            db.session.commit()
     except Exception as e:
         print(f"DB error in background: {e}")
         db.session.rollback()
 
-def update_user_status_bg(user, status):
+def update_user_status_bg(user_id, status):
+    """Background task to update user status with proper app context"""
     try:
-        user.status = status
-        user.last_seen = datetime.utcnow()
-        db.session.commit()
+        with app.app_context():
+            user = User.query.get(user_id)
+            if user:
+                user.status = status
+                user.last_seen = datetime.utcnow()
+                db.session.commit()
+                print(f"User {user_id} status updated to {status}")
+            else:
+                print(f"User {user_id} not found for status update")
     except Exception as e:
         print(f"Error updating user status: {e}")
         db.session.rollback()
@@ -885,14 +893,16 @@ with app.app_context():
 def handle_connect():
     if current_user.is_authenticated:
         join_room(str(current_user.id))
-        socketio.start_background_task(update_user_status_bg, current_user, 'online')
+        # Use the corrected background task with proper app context
+        socketio.start_background_task(update_user_status_bg, current_user.id, 'online')
         emit('user_status', {'user_id': current_user.id, 'status': 'online'}, broadcast=True)
 
 @socketio.on('disconnect')
 def handle_disconnect():
     if current_user.is_authenticated:
         leave_room(str(current_user.id))
-        socketio.start_background_task(update_user_status_bg, current_user, 'offline')
+        # Use the corrected background task with proper app context
+        socketio.start_background_task(update_user_status_bg, current_user.id, 'offline')
         emit('user_status', {'user_id': current_user.id, 'status': 'offline'}, broadcast=True)
 
 
