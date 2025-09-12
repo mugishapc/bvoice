@@ -45,7 +45,7 @@ body {
 
 .app-logo h1 {
     color: #128C7E;
-    font-size: 2.5rem;
+    font-size: 2.2rem;
     margin-bottom: 5px;
 }
 
@@ -107,16 +107,16 @@ body {
 }
 
 .sidebar-header .profile-pic {
-    width: 40px;
-    height: 40px;
+    width: 2.5rem;
+    height: 2.5rem;
     border-radius: 50%;
     object-fit: cover;
 }
 
 .sidebar-actions button,
 .sidebar-actions img {
-    width: 28px;
-    height: 28px;
+    width: 1.8rem;
+    height: 1.8rem;
     margin-left: 10px;
     cursor: pointer;
 }
@@ -147,8 +147,8 @@ body {
 .chat-item:hover { background: #f9f9f9; }
 
 .chat-item .profile-pic {
-    width: 48px;
-    height: 48px;
+    width: 3rem;
+    height: 3rem;
     border-radius: 50%;
     object-fit: cover;
 }
@@ -186,14 +186,14 @@ body {
     gap: 10px;
 }
 .chat-partner-info .profile-pic {
-    width: 40px;
-    height: 40px;
+    width: 2.5rem;
+    height: 2.5rem;
     border-radius: 50%;
     object-fit: cover;
 }
 
 /* ===============================
-   Messages (WhatsApp style)
+   Messages
    =============================== */
 .messages-container {
     flex: 1;
@@ -216,7 +216,7 @@ body {
 
 .message.sent {
     align-self: flex-end;
-    background: #DCF8C6; /* light green */
+    background: #DCF8C6;
     border-top-right-radius: 0;
 }
 .message.received {
@@ -294,11 +294,28 @@ body {
     }
     .sidebar.active { transform: translateX(0); }
     .chat-area { flex: 1; height: 100vh; }
+
     .menu-btn {
-        font-size: 1.5rem;
+        font-size: 1.4rem;
         background: none;
         border: none;
         color: white;
         cursor: pointer;
+    }
+
+    /* scale down icons & avatars */
+    .sidebar-header .profile-pic,
+    .chat-partner-info .profile-pic {
+        width: 2rem;
+        height: 2rem;
+    }
+    .chat-item .profile-pic {
+        width: 2.4rem;
+        height: 2.4rem;
+    }
+    .sidebar-actions button,
+    .sidebar-actions img {
+        width: 1.5rem;
+        height: 1.5rem;
     }
 }
